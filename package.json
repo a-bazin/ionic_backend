@@ -9,8 +9,12 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@capacitor/cli": "^7.2.0",
+    "@capacitor/core": "^7.2.0",
+    "@capacitor/push-notifications": "^7.0.1",
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "firebase": "^11.6.1",
     "firebase-admin": "^13.3.0"
   }
 }
