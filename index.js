@@ -50,21 +50,40 @@ app.post('/uploads', (req, res) => {
     });
 });
 
-// Route pour marquer un produit comme vendu
 app.post('/mark-as-sold', async (req, res) => {
-  const { productId } = req.body;
-  if (!productId) {
-    return res.status(400).send('productId manquant');
+  const { productId, userId } = req.body;  // Ajoute userId pour lier la vente à l'utilisateur
+  if (!productId || !userId) {
+    return res.status(400).send('productId ou userId manquant');
   }
 
   try {
-    await db.collection('product').doc(productId).update({ isSold: true });
-    res.send({ success: true, message: 'Produit marqué comme vendu' });
+    // Met à jour l'article comme vendu
+    const productRef = db.collection('product').doc(productId);
+    await productRef.update({ isSold: true });
+
+    // Vérifie que la mise à jour a bien été effectuée
+    const updatedProduct = await productRef.get();
+    console.log('Produit mis à jour :', updatedProduct.data());
+
+    // Ajoute à la collection sales
+    const productSnapshot = await db.collection('product').doc(productId).get();
+    const product = productSnapshot.data();
+
+    await db.collection('sales').add({
+      sellerId: userId,  // Associe l'utilisateur qui vend
+      productId,
+      productName: product?.name,  // Nom du produit
+      isSeen: false,
+      createdAt: new Date(),
+    });
+
+    res.send({ success: true, message: 'Produit marqué comme vendu et ajouté aux ventes' });
   } catch (err) {
-    console.error('Erreur lors du marquage :', err);
+    console.error('Erreur lors du marquage et ajout :', err);
     res.status(500).send('Erreur lors du marquage comme vendu');
   }
 });
+
 
 // Route pour l'achat (fake payment)
 app.post('/fake-payment', async (req, res) => {
@@ -74,6 +93,14 @@ app.post('/fake-payment', async (req, res) => {
   try {
     const userDoc = await db.collection('users').doc(userId).get();
     const fcmToken = userDoc.data()?.fcmToken;
+
+    await db.collection('sales').add({
+      sellerId: userDoc.data()?.id || userId,
+      productId,
+      productName,
+      isSeen: false,
+      createdAt: new Date()
+    });
 
     if (!fcmToken) {
       return res.status(404).send('Token FCM non trouvé');
@@ -109,6 +136,96 @@ app.get('/products', async (req, res) => {
     res.status(500).send('Erreur lors de la récupération des produits');
   }
 });
+
+app.get('/sales/:sellerId', async (req, res) => {
+  const { sellerId } = req.params;
+  try {
+    const snapshot = await db.collection('sales')
+      .where('sellerId', '==', sellerId)
+      .get();
+
+    const sales = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    res.send(sales);
+  } catch (err) {
+    console.error('Erreur récupération ventes :', err);
+    res.status(500).send('Erreur récupération ventes');
+  }
+});
+
+app.post('/sales/mark-seen', async (req, res) => {
+  const { saleId } = req.body;
+  if (!saleId) return res.status(400).send('saleId manquant');
+
+  try {
+    await db.collection('sales').doc(saleId).update({ isSeen: true });
+    res.send({ success: true });
+  } catch (err) {
+    console.error('Erreur marquage comme vue :', err);
+    res.status(500).send('Erreur marquage');
+  }
+});
+
+app.post('/mark-sale-as-seen', async (req, res) => {
+  const { saleId } = req.body;
+
+  if (!saleId) {
+    return res.status(400).send('saleId manquant');
+  }
+
+  try {
+    await db.collection('sales').doc(saleId).update({
+      isSeen: true
+    });
+    res.send({ success: true, message: 'Vente marquée comme vue' });
+  } catch (err) {
+    console.error('Erreur mise à jour isSeen :', err);
+    res.status(500).send('Erreur serveur');
+  }
+});
+
+
+app.post('/sales', async (req, res) => {
+  const { userId, productName, productId } = req.body;
+  if (!userId || !productName || !productId) {
+    return res.status(400).send('userId, productName, ou productId manquant');
+  }
+
+  try {
+    await db.collection('sales').add({
+      sellerId: userId,
+      productName,
+      productId,
+      isSeen: false,
+      createdAt: new Date()
+    });
+
+    res.send({ success: true, message: 'Vente ajoutée avec succès' });
+  } catch (err) {
+    console.error('Erreur ajout vente:', err);
+    res.status(500).send('Erreur serveur');
+  }
+});
+
+
+app.get('/sales', async (req, res) => {
+  const userId = req.query.userId;
+  if (!userId) {
+    return res.status(400).send('userId manquant');
+  }
+
+  try {
+    const snapshot = await db.collection('sales')
+      .where('sellerId', '==', userId)
+      .get();
+
+    const sales = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    res.json(sales);  // Retourne les ventes pour cet utilisateur
+  } catch (err) {
+    console.error('Erreur récupération ventes:', err);
+    res.status(500).send('Erreur récupération ventes');
+  }
+});
+
 
 // Middleware pour servir les fichiers statiques après les routes API
 app.use('/public', express.static(path.join(__dirname, 'public')));
